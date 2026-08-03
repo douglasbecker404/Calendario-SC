@@ -1,0 +1,299 @@
+{% extends "base.html" %}
+
+{% block title %}Minha Agenda | {{ cidade }}{% endblock %}
+
+{% block content %}
+<!-- Container para alertas flutuantes -->
+<div id="alerta-container" class="position-fixed top-0 end-0 p-3 alerta-usuario-container"></div>
+
+<!-- Cabeçalho com filtro de cidade e exportação -->
+<div class="d-flex justify-content-between align-items-center mb-4 pb-2 border-bottom flex-wrap">
+  <div>
+    <h2 class="h3 mb-0 fw-bold text-dark">Minha Agenda</h2>
+    <p class="text-muted mb-0 small">
+      <i class="bi bi-geo-alt-fill text-danger me-1"></i>
+      {% if cidade %}
+        Cidade padrão: <strong>{{ cidade }}</strong>
+      {% else %}
+        Visualizando compromissos por cidade
+      {% endif %}
+    </p>
+  </div>
+  <div class="d-flex align-items-center mt-2 mt-md-0">
+    <div class="me-2 filtro-cidade-wrapper">
+      <label class="form-label small text-muted fw-semibold mb-1">Filtrar por cidade</label>
+      <input list="cidadesList" id="filtroCidade" class="form-control form-control-sm" placeholder="Selecione ou digite..." autocomplete="off">
+      <!-- datalist removido – usa o global do base.html -->
+    </div>
+    <button class="btn btn-outline-success btn-sm mt-4" onclick="exportarAgenda()">
+      <i class="bi bi-download me-1"></i> Exportar
+    </button>
+  </div>
+</div>
+
+<!-- Layout em duas colunas -->
+<div class="row g-4">
+  <!-- Calendário -->
+  <div class="col-lg-9">
+    <div class="card shadow-sm border-0 rounded-4">
+      <div class="card-body p-3 p-md-4">
+        <div id="calendario"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Próximos Compromissos (lateral) -->
+  <div class="col-lg-3">
+    <div class="card shadow-sm border-0 rounded-4">
+      <div class="card-body p-4">
+        <h5 class="fw-bold text-dark h6 mb-3 d-flex align-items-center">
+          <i class="bi bi-list-ul text-primary me-2"></i>Próximos Compromissos
+        </h5>
+        <div id="proximosCompromissos" class="small">
+          <!-- Carregado via JS -->
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Modal de Detalhes do Evento -->
+<div class="modal fade" id="detalhesModal" tabindex="-1" aria-labelledby="modalTitulo" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content border-0 shadow">
+      
+      <div class="modal-header bg-light border-bottom-0">
+        <h5 class="modal-title fw-bold text-dark" id="modalTitulo">
+          <i class="bi bi-calendar-event text-primary me-2"></i>Detalhes do Compromisso
+        </h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+      </div>
+      
+      <div class="modal-body py-4">
+        <div class="mb-3">
+          <span class="text-muted small text-uppercase fw-semibold d-block">Descrição do Evento</span>
+          <p class="fs-5 mt-1 mb-0 text-dark" id="modalDesc"></p>
+        </div>
+        <div class="mb-3">
+          <span class="text-muted small text-uppercase fw-semibold d-block">Cidade</span>
+          <p class="fw-medium text-dark mb-0" id="modalCidade"></p>
+        </div>
+        <div class="mb-0">
+          <span class="text-muted small text-uppercase fw-semibold d-block mb-1">Status Atual</span>
+          <span id="modalStatusBadge" class="badge rounded-pill fs-6 px-3 py-2"></span>
+        </div>
+      </div>
+      
+      <div class="modal-footer bg-light border-top-0 d-flex justify-content-between">
+        <button type="button" class="btn btn-outline-secondary btn-sm" data-bs-dismiss="modal">Fechar</button>
+        <button id="btnCheckin" class="btn btn-success btn-sm fw-semibold px-3 shadow-sm">
+          <i class="bi bi-check2-circle me-1"></i> Fazer Check-in
+        </button>
+      </div>
+
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // ---------- Lista de Feriados Nacionais (Fixos) ----------
+  const feriados = [
+    { title: 'Ano Novo', start: '2026-01-01' },
+    { title: 'Carnaval', start: '2026-02-17' },
+    { title: 'Paixão de Cristo', start: '2026-04-03' },
+    { title: 'Tiradentes', start: '2026-04-21' },
+    { title: 'Dia do Trabalho', start: '2026-05-01' },
+    { title: 'Independência do Brasil', start: '2026-09-07' },
+    { title: 'Nossa Senhora Aparecida', start: '2026-10-12' },
+    { title: 'Finados', start: '2026-11-02' },
+    { title: 'Proclamação da República', start: '2026-11-15' },
+    { title: 'Natal', start: '2026-12-25' }
+  ];
+
+  let eventoClicado = null;
+  let modalInstancia = null;
+
+  document.addEventListener('DOMContentLoaded', function() {
+    modalInstancia = new bootstrap.Modal(document.getElementById('detalhesModal'));
+    const calendarEl = document.getElementById('calendario');
+    
+    window.calendar = new FullCalendar.Calendar(calendarEl, {
+      initialView: 'dayGridMonth',
+      locale: 'pt-br',
+      themeSystem: 'bootstrap5',
+      events: (fetchInfo, successCallback, failureCallback) => {
+        let params = new URLSearchParams();
+        const filtro = document.getElementById('filtroCidade').value.trim();
+        if (filtro) {
+          params.append('cidade', filtro);
+        }
+        fetch('/api/eventos?' + params.toString())
+          .then(res => res.json())
+          .then(data => {
+            const eventosComFeriados = [...data, ...feriados.map(f => ({
+              ...f,
+              backgroundColor: '#f8f9fa',
+              textColor: '#6c757d',
+              borderColor: '#e9ecef',
+              extendedProps: { feriado: true }
+            }))];
+            successCallback(eventosComFeriados);
+          })
+          .catch(err => failureCallback(err));
+      },
+      headerToolbar: {
+        left: 'prev,next today',
+        center: 'title',
+        right: 'dayGridMonth,timeGridWeek,listWeek'
+      },
+      buttonText: {
+        today: 'Hoje',
+        month: 'Mês',
+        week: 'Semana',
+        list: 'Lista'
+      },
+      eventClick: function(info) {
+        if (info.event.extendedProps.feriado) return;
+        
+        eventoClicado = info.event;
+        const ehConfirmado = info.event.extendedProps.checkin;
+        
+        document.getElementById('modalDesc').textContent = info.event.extendedProps.descricao || info.event.title;
+        document.getElementById('modalCidade').textContent = info.event.extendedProps.cidade || 'Não informada';
+        
+        const badgeElement = document.getElementById('modalStatusBadge');
+        if (ehConfirmado) {
+          badgeElement.textContent = 'Confirmado';
+          badgeElement.className = 'badge rounded-pill fs-6 px-3 py-2 text-bg-success';
+        } else {
+          badgeElement.textContent = 'Pendente';
+          badgeElement.className = 'badge rounded-pill fs-6 px-3 py-2 text-bg-warning';
+        }
+        
+        let btn = document.getElementById('btnCheckin');
+        btn.disabled = ehConfirmado;
+        btn.style.display = ehConfirmado ? 'none' : 'inline-block';
+        
+        modalInstancia.show();
+      }
+    });
+    
+    calendar.render();
+
+    const filtroInput = document.getElementById('filtroCidade');
+    filtroInput.addEventListener('input', () => {
+      window.calendar.refetchEvents();
+      carregarProximosCompromissos();
+    });
+    filtroInput.addEventListener('change', () => {
+      window.calendar.refetchEvents();
+      carregarProximosCompromissos();
+    });
+
+    carregarProximosCompromissos();
+  });
+
+  // ---------- Carregar Próximos Compromissos ----------
+  function carregarProximosCompromissos() {
+    const filtro = document.getElementById('filtroCidade').value.trim();
+    let url = '/api/eventos';
+    if (filtro) {
+      url += '?cidade=' + encodeURIComponent(filtro);
+    }
+    fetch(url)
+      .then(res => res.json())
+      .then(eventos => {
+        const agora = new Date();
+        const proximos = eventos
+          .filter(e => new Date(e.start) >= agora)
+          .sort((a, b) => new Date(a.start) - new Date(b.start))
+          .slice(0, 5);
+          
+        const container = document.getElementById('proximosCompromissos');
+        if (proximos.length === 0) {
+          container.innerHTML = '<p class="text-muted mb-0 fst-italic">Nenhum compromisso futuro encontrado.</p>';
+          return;
+        }
+        
+        container.innerHTML = proximos.map(e => `
+          <div class="d-flex justify-content-between align-items-center border-bottom py-2">
+            <div>
+              <span class="fw-bold text-dark">${e.start.substring(11,16)}</span> - <span class="text-secondary">${e.extendedProps.descricao}</span><br>
+              <small class="text-muted"><i class="bi bi-calendar3 me-1"></i>${e.start.substring(0,10)} &bull; ${e.extendedProps.cidade}</small>
+            </div>
+            <span class="badge ${e.extendedProps.checkin ? 'bg-success' : 'bg-warning'} ms-2" title="${e.extendedProps.checkin ? 'Confirmado' : 'Pendente'}">
+              ${e.extendedProps.checkin ? '✓' : '⏳'}
+            </span>
+          </div>
+        `).join('');
+      })
+      .catch(() => console.error('Erro ao carregar próximos compromissos.'));
+  }
+
+  // ---------- Exportar Agenda ----------
+  function exportarAgenda() {
+    const filtro = document.getElementById('filtroCidade').value.trim();
+    let url = '/api/exportar';
+    if (filtro) {
+      url += '?cidade=' + encodeURIComponent(filtro);
+    }
+    window.location.href = url;
+  }
+
+  // ---------- Check-in ----------
+  document.getElementById('btnCheckin').addEventListener('click', async () => {
+    if (!eventoClicado) return;
+    
+    const btn = document.getElementById('btnCheckin');
+    btn.disabled = true;
+    btn.innerHTML = '<span class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></span>Registrando...';
+    
+    try {
+      const response = await fetch('/api/checkin/' + eventoClicado.id, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+      });
+      
+      if (response.ok) {
+        eventoClicado.setExtendedProp('checkin', true);
+        eventoClicado.setProp('backgroundColor', '#198754');
+        eventoClicado.setProp('borderColor', '#198754');
+        
+        document.getElementById('modalStatusBadge').textContent = 'Confirmado';
+        document.getElementById('modalStatusBadge').className = 'badge rounded-pill fs-6 px-3 py-2 text-bg-success';
+        btn.style.display = 'none';
+        
+        carregarProximosCompromissos();
+        mostrarAlerta('Check-in realizado com sucesso!', 'success');
+        modalInstancia.hide();
+      } else {
+        const data = await response.json();
+        mostrarAlerta(data.mensagem || 'Erro ao registrar check-in.', 'danger');
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Fazer Check-in';
+      }
+    } catch (error) {
+      console.error("Erro na requisição:", error);
+      mostrarAlerta('Erro de conexão. Verifique sua internet.', 'danger');
+      btn.disabled = false;
+      btn.innerHTML = '<i class="bi bi-check2-circle me-1"></i> Fazer Check-in';
+    }
+  });
+
+  // ---------- Alerta Flutuante ----------
+  function mostrarAlerta(mensagem, tipo = 'success') {
+    const container = document.getElementById('alerta-container');
+    if (!container) return;
+    container.innerHTML = `
+      <div class="alert alert-${tipo} alert-dismissible fade show shadow-sm" role="alert">
+        <i class="bi ${tipo === 'success' ? 'bi-check-circle-fill' : 'bi-exclamation-triangle-fill'} me-2"></i>
+        ${mensagem}
+        <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>
+      </div>
+    `;
+    setTimeout(() => { container.innerHTML = ''; }, 4000);
+  }
+</script>
+{% endblock %}
