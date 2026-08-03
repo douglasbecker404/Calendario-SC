@@ -1,0 +1,44 @@
+{
+  "Porto União": [
+    {
+      "data_iso": "2026-07-31",
+      "hora": "09:00",
+      "descricao": "Reunião com fornecedores",
+      "checkin": false
+    },
+    {
+      "data_iso": "2026-07-31",
+      "hora": "14:00",
+      "descricao": "Visita técnica à fábrica",
+      "checkin": false
+    },
+    {
+      "data_iso": "2026-08-01",
+      "hora": "10:00",
+      "descricao": "Treinamento equipe",
+      "checkin": false
+    }
+  ],
+  "Florianópolis": [
+    {
+      "data_iso": "2026-07-31",
+      "hora": "11:00",
+      "descricao": "Reunião diretoria",
+      "checkin": false
+    },
+    {
+      "data_iso": "2026-08-01",
+      "hora": "15:00",
+      "descricao": "Palestra inovação",
+      "checkin": false
+    }
+  ],
+  "Joinville": [
+    {
+      "data_iso": "2026-07-31",
+      "hora": "08:00",
+      "descricao": "Feira industrial",
+      "checkin": false
+    }
+  ]
+}
