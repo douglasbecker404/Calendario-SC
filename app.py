@@ -21,7 +21,12 @@ from werkzeug.security import generate_password_hash, check_password_hash
 # =====================================================================
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.getenv('SECRET_KEY', 'dev-secret-key-change-in-production')
-app.config['SQLALCHEMY_DATABASE_URI'] = os.getenv('DATABASE_URL', 'sqlite:///agenda_saas.db')
+
+# Ajuste para PostgreSQL no Render (substitui 'postgres://' por 'postgresql://')
+db_url = os.getenv('DATABASE_URL', 'sqlite:///agenda_saas.db')
+if db_url and db_url.startswith('postgres://'):
+    db_url = db_url.replace('postgres://', 'postgresql://', 1)
+app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config['SQLALCHEMY_TRACK_MODIFICATIONS'] = False
 
 db = SQLAlchemy(app)
@@ -199,7 +204,7 @@ def cadastro():
         else:
             # Verificação case‑insensitive
             usuario_existente = Usuario.query.filter(
-                db.func.lower(Usuario.username) == username.lower()
+                func.lower(Usuario.username) == username.lower()
             ).first()
             if usuario_existente:
                 flash('Este nome de usuário já está registrado no sistema.', 'danger')
@@ -232,7 +237,7 @@ def logout():
 def cidades_com_eventos():
     resultados = db.session.query(
         Compromisso.cidade,
-        db.func.count(Compromisso.id).label('total')
+        func.count(Compromisso.id).label('total')
     ).group_by(Compromisso.cidade).all()
     
     return jsonify({
@@ -352,13 +357,11 @@ def editar_compromisso(id):
     except ValueError:
         return jsonify({'status': 'erro', 'mensagem': 'Formato de data ou hora inválido.'}), 400
 
-    # Impedir data/hora no passado
     agora = datetime.datetime.now()
     evento_datetime = datetime.datetime.combine(data_dt, hora_dt)
     if evento_datetime < agora:
         return jsonify({'status': 'erro', 'mensagem': 'Não é permitido reagendar para horários passados.'}), 400
 
-    # Verificar conflito com outros compromissos (mesmo local, data e hora)
     conflito = Compromisso.query.filter(
         Compromisso.cidade == cidade,
         Compromisso.data == data_dt,
@@ -393,7 +396,6 @@ def checkin(id):
     if not comp:
         return jsonify({'status': 'erro', 'mensagem': 'Compromisso não encontrado.'}), 404
 
-    # Qualquer usuário autenticado pode fazer check-in
     comp.checkin = True
     db.session.commit()
     return jsonify({'status': 'sucesso', 'mensagem': 'Check-in confirmado com sucesso.'}), 200
@@ -452,18 +454,15 @@ def adicionar_usuario():
     tipo = dados.get('tipo', 'Usuário')
     cidade = dados.get('cidade', '') if tipo == 'Usuário' else None
 
-    # --- Validações ---
     if not username or not senha:
         return jsonify({'status': 'erro', 'mensagem': 'Usuário e senha são obrigatórios.'}), 400
 
-    # Novo: validação de tamanho mínimo do nome
     if len(username) < 3:
         return jsonify({'status': 'erro', 'mensagem': 'O nome de usuário deve ter pelo menos 3 caracteres.'}), 400
 
     if len(senha) < 4:
         return jsonify({'status': 'erro', 'mensagem': 'A senha deve ter no mínimo 4 caracteres.'}), 400
 
-    # Verificação case‑insensitive (substitui o filter_by)
     if Usuario.query.filter(func.lower(Usuario.username) == username.lower()).first():
         return jsonify({'status': 'erro', 'mensagem': 'Este nome de usuário já está em uso.'}), 409
 
@@ -473,7 +472,6 @@ def adicionar_usuario():
     if cidade and cidade not in CIDADES_SC:
         return jsonify({'status': 'erro', 'mensagem': 'Cidade inválida. Selecione um município de Santa Catarina.'}), 400
 
-    # --- Criação do usuário ---
     novo = Usuario(
         username=username,
         senha_hash=generate_password_hash(senha),
@@ -483,7 +481,6 @@ def adicionar_usuario():
     db.session.add(novo)
     db.session.commit()
     return jsonify({'status': 'sucesso', 'mensagem': 'Usuário adicionado com sucesso.'}), 201
-
 
 @app.route('/api/usuarios/excluir/<int:id>', methods=['DELETE'])
 @admin_required
@@ -605,7 +602,9 @@ def criar_dados_iniciais():
         db.session.add_all(exemplos_eventos)
         db.session.commit()
 
+# Garante que as tabelas sejam criadas no contexto da aplicação (útil para deploy no Render)
+with app.app_context():
+    criar_dados_iniciais()
+
 if __name__ == '__main__':
-    with app.app_context():
-        criar_dados_iniciais()
     app.run(debug=True)
